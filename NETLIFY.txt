@@ -1,0 +1,31 @@
+Publicar Votebook en Netlify
+============================
+
+1. En Netlify: Add new site → Import an existing project
+   o arrastre la carpeta votebook-astro (no el GestorApp viejo).
+
+2. Build settings
+   Base directory: (vacío, o votebook-astro si está dentro de otro repo)
+   Build command: npm run build
+   Publish directory: dist
+
+3. Site configuration → Environment variables
+   SUPABASE_URL = https://reexnczsgegrfwsmfaum.supabase.co
+   SUPABASE_ANON_KEY = sb_publishable_sZT-FuEkBzti2QBXE2Z-Sw_QLOay6l3
+   SUPABASE_SERVICE_ROLE = (la key service_role de Settings → API)
+
+4. Deploy
+
+5. URL del sitio: https://????.netlify.app/login
+
+Importante
+- No suba el index.html viejo. Este sitio es Astro.
+- Si ya tiene regal-treacle-6caa99.netlify.app, puede:
+  Site configuration → Build & deploy → cambiar la carpeta
+  o crear un sitio NUEVO y dejar el viejo apagado.
+- Sin SERVICE_ROLE, Estructura puede salir vacía (RLS).
+
+Apagar HTML viejo
+- En regal-treacle-6caa99 detenga o borre ese sitio.
+- No suba GestorApp.zip ni index.html con supabase-config.js.
+- Publique solo votebook-astro.

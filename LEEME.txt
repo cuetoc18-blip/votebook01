@@ -1,0 +1,26 @@
+VOTEBOOK en Astro + servidor API
+================================
+
+El navegador ya no lleva la key de Supabase.
+Habla solo con /api. El servidor habla con la base.
+
+1. Copiar .env.example a .env
+2. Pegar SUPABASE_SERVICE_ROLE (Supabase → Settings → API → service_role)
+3. npm install
+4. npm run dev
+5. Abrir http://localhost:4321/login
+
+Netlify
+- Build: npm run build
+- Variables: SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE
+- Adapter ya está en astro.config.mjs
+
+Rutas
+- POST /api/auth/login
+- POST /api/auth/logout
+- GET  /api/auth/me
+- POST /api/db          (tablas permitidas)
+- POST /api/storage     (buckets judicial y whatsapp)
+
+El panel viejo queda en /panel.html y entra por /app
+después del login (cookie httpOnly).
