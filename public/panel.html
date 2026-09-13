@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+
+    <!-- Pantalla de carga (no dejar el panel en blanco) -->
+    <style id="auth-boot-hide">
+      #boot-loader {
+        position: fixed; inset: 0; z-index: 99999;
+        background: #f8fafc; display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        font-family: system-ui, sans-serif; color: #334155;
+      }
+      #boot-loader .spin {
+        width: 36px; height: 36px; border: 3px solid #c7d2fe;
+        border-top-color: #4f46e5; border-radius: 50%;
+        animation: bootspin .7s linear infinite; margin-bottom: 14px;
+      }
+      @keyframes bootspin { to { transform: rotate(360deg); } }
+      html.auth-ok #boot-loader { display: none !important; }
+    </style>
+    <script>
+      document.documentElement.classList.add('auth-pending');
+    </script>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Votebook</title>
+
+    <!-- ESTILOS Y LIBRERÍAS EXTERNAS -->
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome (Iconos) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Leaflet CSS (Mapas) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- SheetJS y Socket.IO se cargan después del login (ver scripts al final) -->
+    <!-- TUS ARCHIVOS ESTILO (Ajusta la ruta si es necesario) -->
+    <link rel="stylesheet" href="/css/app.css" />
+
+    <style>
+        /* Animaciones y Estilos Personalizados */
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        
+        /* Ocultar secciones por defecto */
+        .modulo-seccion { display: none; }
+        .modulo-seccion.active { display: block; }
+        
+        /* Estilos de Scrollbar personalizado */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* Mapa */
+        #mapa-container { height: 400px; width: 100%; border-radius: 0.75rem; z-index: 1; }
+
+        /* Estilos adicionales para el módulo PQRS (compatibilidad) */
+        .pqrs-status.success { color: #16a34a; }
+        .pqrs-status.error { color: #dc2626; }
+        .pqrs-loader { display: none; }
+
+        @media (max-width: 767px) {
+          #nav-modulos {
+            position: fixed;
+            top: 80px;
+            left: 0;
+            bottom: 0;
+            width: min(82vw, 300px);
+            background: #fff;
+            z-index: 60;
+            transform: translateX(-105%);
+            transition: transform .22s ease;
+            overflow-y: auto;
+            box-shadow: 8px 0 24px rgba(15, 23, 42, .18);
+            padding: 12px;
+          }
+          #nav-modulos .flex.space-x-2 {
+            flex-direction: column;
+            space-x: 0;
+            gap: 6px;
+            padding: 0;
+          }
+          #nav-modulos .tab-btn {
+            width: 100%;
+            justify-content: flex-start;
+            padding: 12px 14px;
+          }
+          body.menu-abierto #nav-modulos { transform: translateX(0); }
+          body.menu-abierto #nav-modulos-backdrop { display: block; }
+          #nav-modulos-wrap { border: 0; box-shadow: none; height: 0; overflow: visible; }
+          #nav-modulos-wrap .max-w-7xl { padding: 0; overflow: visible; }
+        }
+        #nav-modulos-backdrop {
+          display: none;
+          position: fixed;
+          inset: 0;
+          top: 64px;
+          background: rgba(15, 23, 42, .45);
+          z-index: 55;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans min-h-screen flex flex-col">
+    <div id="boot-loader">
+      <div class="spin"></div>
+      <div style="font-weight:700;font-size:18px;">Votebook</div>
+      <div style="font-size:13px;color:#64748b;margin-top:6px;">Validando sesión y cargando panel…</div>
+    </div>
+
+    <!-- BARRA DE NAVEGACIÓN SUPERIOR -->
+    <nav class="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center min-h-[88px] py-3">
+                <div class="flex items-center gap-2 min-w-0">
+                    <button id="btn-menu" type="button" class="md:hidden w-10 h-10 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 shrink-0" aria-label="Menú">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                    <img src="/img/votebook.png" alt="Votebook" class="h-6 sm:h-7 md:h-10 w-auto max-w-[126px] sm:max-w-[168px] object-contain shrink-0">
+                    <span id="nav-modulo-actual" class="md:hidden text-sm font-semibold text-slate-700 truncate">Estructura</span>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <button id="btn-login" class="text-sm font-medium text-slate-600 hover:text-indigo-600 transition">
+                        <i class="fas fa-user-circle mr-1"></i> <span id="user-name">Invitado</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- BARRA DE PESTAÑAS (MÓDULOS) / menú hamburguesa en celular -->
+    <div id="nav-modulos-wrap" class="bg-white border-b border-slate-200 sticky top-16 z-40 shadow-sm">
+        <div id="nav-modulos-backdrop" onclick="cerrarMenuMovil()"></div>
+        <div id="nav-modulos" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 overflow-x-auto no-scrollbar">
+            <div class="flex space-x-2 py-2">
+<button onclick="cambiarModulo('estructura')" id="tab-estructura" class="tab-btn px-4 py-2 text-sm font-medium rounded-lg bg-indigo-50 text-indigo-700 transition-all inline-flex items-center gap-2">
+                    <img src="/img/estructura-logo.png" alt="" class="w-5 h-5 object-contain">Estructura
+                </button>
+                <button onclick="cambiarModulo('infovotante')" id="tab-infovotante" class="tab-btn px-4 py-2 text-sm font-medium rounded-lg text-slate-600 hover:bg-slate-50 transition-all inline-flex items-center gap-2">
+                    <img src="/img/info-votante.png" alt="" class="w-5 h-5 object-contain">Info Votante
+                </button>
+                <button onclick="cambiarModulo('agenda')" id="tab-agenda" class="tab-btn px-4 py-2 text-sm font-medium rounded-lg text-slate-600 hover:bg-slate-50 transition-all inline-flex items-center gap-2">
+                    <img src="/img/agenda.png" alt="" class="w-5 h-5 object-contain">Agenda
+                </button>
+                <button onclick="cambiarModulo('gestiones-judiciales')" id="tab-gestiones-judiciales" class="tab-btn px-4 py-2 text-sm font-medium rounded-lg text-slate-600 hover:bg-slate-50 transition-all inline-flex items-center gap-2">
+                    <img src="/img/judicial.png" alt="" class="w-5 h-5 object-contain">Gestiones Judiciales
+                </button>
+                <button onclick="cambiarModulo('seguimiento')" id="tab-seguimiento" class="tab-btn px-4 py-2 text-sm font-medium rounded-lg text-slate-600 hover:bg-slate-50 transition-all inline-flex items-center gap-2">
+                    <img src="/img/seguimiento.png" alt="" class="w-5 h-5 object-contain">Seguimiento
+                </button>
+                <button onclick="cambiarModulo('gestiones')" id="tab-gestiones" class="tab-btn px-4 py-2 text-sm font-medium rounded-lg text-slate-600 hover:bg-slate-50 transition-all inline-flex items-center gap-2">
+                    <img src="/img/gestiones.png" alt="" class="w-5 h-5 object-contain">Gestiones
+                </button>
+                <button onclick="cambiarModulo('errores')" id="tab-errores" class="tab-btn px-4 py-2 text-sm font-medium rounded-lg text-slate-600 hover:bg-slate-50 transition-all inline-flex items-center gap-2">
+                    <img src="/img/usuario-error.png" alt="" class="w-5 h-5 object-contain">Errores
+                </button>
+                
+                <!-- NUEVO BOTÓN DE MENSAJES -->
+                <button onclick="cambiarModulo('mensajes')" id="tab-mensajes" class="tab-btn px-4 py-2 text-sm font-medium rounded-lg text-slate-600 hover:bg-slate-50 transition-all inline-flex items-center gap-2">
+                    <img src="/img/mensajes.png" alt="" class="w-5 h-5 object-contain">Mensajes
+                </button>
+
+                <!-- BOTÓN BOT PQRS (integrado del primer HTML) -->
+                <button onclick="cambiarModulo('pqrs')" id="tab-pqrs" class="tab-btn px-4 py-2 text-sm font-medium rounded-lg text-slate-600 hover:bg-slate-50 transition-all inline-flex items-center gap-2">
+                    <img src="/img/bot-pqrs.png" alt="" class="w-5 h-5 object-contain">Bot PQRS
+                </button>
+            </div>
+        </div>
+        <!-- Scripts de lógica de navegación básica -->
+        <script>
+            function cerrarMenuMovil() {
+                document.body.classList.remove('menu-abierto');
+                var icon = document.querySelector('#btn-menu i');
+                if (icon) icon.className = 'fas fa-bars';
+            }
+            function abrirMenuMovil() {
+                document.body.classList.add('menu-abierto');
+                var icon = document.querySelector('#btn-menu i');
+                if (icon) icon.className = 'fas fa-times';
+            }
+            function toggleMenuMovil() {
+                if (document.body.classList.contains('menu-abierto')) cerrarMenuMovil();
+                else abrirMenuMovil();
+            }
+
+            function cambiarModulo(moduloId) {
+                if (moduloId === 'asistencia') moduloId = 'mensajes';
+                cerrarMenuMovil();
+                var titulos = {
+                    estructura: 'Estructura',
+                    infovotante: 'Info Votante',
+                    agenda: 'Agenda',
+                    'gestiones-judiciales': 'Judiciales',
+                    seguimiento: 'Seguimiento',
+                    gestiones: 'Gestiones',
+                    errores: 'Errores',
+                    mensajes: 'Mensajes',
+                    pqrs: 'Bot PQRS'
+                };
+                var lbl = document.getElementById('nav-modulo-actual');
+                if (lbl) lbl.textContent = titulos[moduloId] || moduloId;
+                // Ocultar todas las secciones
+                document.querySelectorAll('.modulo-seccion').forEach(el => {
+                    el.classList.remove('active', 'fade-in');
+                    el.style.display = 'none';
+                });
+                
+                // Quitar clase activa de todos los botones
+                document.querySelectorAll('.tab-btn').forEach(btn => {
+                    btn.classList.remove('bg-indigo-50', 'text-indigo-700');
+                    btn.classList.add('text-slate-600');
+                });
+
+                // Mostrar la sección seleccionada
+                const seccion = document.getElementById('modulo-' + moduloId);
+                if (seccion) {
+                    seccion.style.display = 'block';
+                    seccion.classList.add('active', 'fade-in');
+                    
+                    // Marcar botón activo
+                    const btnActivo = document.getElementById('tab-' + moduloId);
+                    if (btnActivo) {
+                        btnActivo.classList.remove('text-slate-600');
+                        btnActivo.classList.add('bg-indigo-50', 'text-indigo-700');
+                    }
+
+                    // Si es el mapa, refrescar tamaño (bug común de Leaflet)
+                    
+                }
+            }
+
+            // Iniciar en Inicio por defecto
+            document.addEventListener('DOMContentLoaded', () => {
+                cambiarModulo('estructura');
+                var btnMenu = document.getElementById('btn-menu');
+                if (btnMenu) btnMenu.onclick = toggleMenuMovil;
+            });
+        </script>
+    </div>
+
+    <!-- CONTENIDO PRINCIPAL -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        <!-- ==================== MÓDULO ESTRUCTURA ==================== -->
+        <section id="modulo-estructura" class="modulo-seccion fade-in">
+            <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
+                <div>
+                    <h1 class="text-2xl font-bold text-slate-800">🗂️ Estructura Organizacional</h1>
+                    <p class="text-slate-500 text-sm">Coordinadores · Líderes · Amigos</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <button id="btn-importar-estructura" type="button" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg text-sm font-medium transition border border-slate-200">
+                        <i class="fas fa-file-import mr-1"></i>Importar
+                    </button>
+                    <input type="file" id="est-import-file" accept=".csv,.xlsx,.xls,.txt" class="hidden">
+                    <button id="btn-nuevo-estructura" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">
+                        <i class="fas fa-plus mr-2"></i><span id="btn-nuevo-estructura-texto">Nuevo Coordinador</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Sub-pestañas -->
+            <div class="flex flex-wrap gap-2 mb-5 border-b border-slate-200 pb-2">
+                <button type="button" data-sub="coordinadores" class="est-sub-btn px-4 py-2 text-sm font-medium rounded-lg bg-indigo-50 text-indigo-700 transition-all">
+                    <i class="fas fa-user-tie mr-1.5"></i>Coordinadores
+                </button>
+                <button type="button" data-sub="lideres" class="est-sub-btn px-4 py-2 text-sm font-medium rounded-lg text-slate-600 hover:bg-slate-50 transition-all">
+                    <i class="fas fa-user-friends mr-1.5"></i>Líderes
+                </button>
+                <button type="button" data-sub="amigos" class="est-sub-btn px-4 py-2 text-sm font-medium rounded-lg text-slate-600 hover:bg-slate-50 transition-all">
+                    <i class="fas fa-user mr-1.5"></i>Amigos
+                </button>
+            </div>
+
+            <!-- Formulario -->
+            <div id="form-estructura" class="hidden bg-white p-6 rounded-2xl shadow-sm border border-slate-200 mb-6">
+                <h2 id="form-estructura-titulo" class="text-lg font-semibold text-slate-700 mb-4">Nuevo registro</h2>
+                <input type="hidden" id="est-tipo" value="">
+                <input type="hidden" id="est-edit-id" value="">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-1">Cédula <span class="text-rose-500">*</span></label>
+                        <input type="text" id="est-cedula" inputmode="numeric" pattern="[0-9]*" placeholder="Solo números" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-1">Nombre <span class="text-rose-500">*</span></label>
+                        <input type="text" id="est-nombre" placeholder="Nombre completo" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-1">Barrio <span class="text-rose-500">*</span></label>
+                        <input type="text" id="est-barrio" list="est-barrio-list" placeholder="Escribe o elige el barrio" autocomplete="off" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
+                        <datalist id="est-barrio-list"></datalist>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-1">Localidad <span class="text-rose-500">*</span></label>
+                        <select id="est-localidad" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
+                            <option value="">— Se asigna al elegir barrio —</option>
+                            <option value="Norte-Centro Histórico">Norte-Centro Histórico</option>
+                            <option value="Riomar">Riomar</option>
+                            <option value="Metropolitana">Metropolitana</option>
+                            <option value="Suroriente">Suroriente</option>
+                            <option value="Suroccidente">Suroccidente</option>
+                        </select>
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="block text-sm font-medium text-slate-600 mb-1">Dirección</label>
+                        <input type="text" id="est-direccion" placeholder="Dirección" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-1">Teléfono</label>
+                        <input type="text" id="est-telefono" placeholder="573001234567" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-1">Puesto de votación</label>
+                        <input type="text" id="est-puesto" placeholder="Nombre del puesto" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-1">Mesa</label>
+                        <input type="text" id="est-mesa" inputmode="numeric" placeholder="Nº de mesa" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                    </div>
+                    <div id="est-foto-wrap" class="md:col-span-2 hidden">
+                        <label class="block text-sm font-medium text-slate-600 mb-1">Foto</label>
+                        <div class="flex items-center gap-3">
+                            <input type="file" id="est-foto" accept="image/*" class="flex-1 text-sm text-slate-600 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700 file:font-medium hover:file:bg-indigo-100">
+                            <img id="est-foto-preview" src="" alt="" class="hidden w-14 h-14 rounded-xl object-cover border border-slate-200">
+                        </div>
+                    </div>
+                    <div id="est-parent-wrap" class="md:col-span-2 hidden">
+                        <label class="block text-sm font-medium text-slate-600 mb-1" id="est-parent-label">Pertenece a</label>
+                        <select id="est-parent" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
+                            <option value="">— Seleccionar —</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="flex gap-3 mt-4">
+                    <button id="btn-guardar-estructura" class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-6 py-2 rounded-lg transition">
+                        Guardar
+                    </button>
+                    <button id="btn-cancelar-estructura" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium px-4 py-2 rounded-lg transition">
+                        Cancelar
+                    </button>
+                </div>
+            </div>
+
+
+            <!-- Filtros Estructura (colapsables) -->
+            <div id="est-filtros" class="mb-4">
+              <div class="flex flex-wrap items-center gap-2 mb-2">
+                <button type="button" id="est-filtro-toggle" class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 transition shadow-sm">
+                  <i class="fas fa-filter text-indigo-500"></i>
+                  <span>Filtros</span>
+                  <i id="est-filtro-chevron" class="fas fa-chevron-down text-xs text-slate-400 transition-transform"></i>
+                </button>
+                <button type="button" id="est-filtro-limpiar" class="hidden text-xs text-slate-500 hover:text-indigo-600 font-medium px-2 py-1">Limpiar filtros</button>
+                <span id="est-filtro-resumen" class="text-[11px] text-slate-400"></span>
+              </div>
+              <div id="est-filtros-panel" class="hidden bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <div>
+                    <label class="block text-[11px] font-semibold text-slate-500 mb-1">Nombre</label>
+                    <input type="text" id="est-filtro-nombre" placeholder="Buscar nombre..." class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                  </div>
+                  <div>
+                    <label class="block text-[11px] font-semibold text-slate-500 mb-1">Cédula</label>
+                    <input type="text" id="est-filtro-cedula" inputmode="numeric" placeholder="Solo números" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                  </div>
+                  <div>
+                    <label class="block text-[11px] font-semibold text-slate-500 mb-1">Barrio</label>
+                    <input type="text" id="est-filtro-barrio" placeholder="Barrio..." class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                  </div>
+                  <div>
+                    <label class="block text-[11px] font-semibold text-slate-500 mb-1">Líder</label>
+                    <input type="text" id="est-filtro-lider" placeholder="Nombre del líder..." class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                  </div>
+                  <div>
+                    <label class="block text-[11px] font-semibold text-slate-500 mb-1">Coordinador</label>
+                    <input type="text" id="est-filtro-coordinador" placeholder="Nombre del coordinador..." class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                  </div>
+                  <div>
+                    <label class="block text-[11px] font-semibold text-slate-500 mb-1">Puesto de votación</label>
+                    <input type="text" id="est-filtro-puesto" placeholder="Puesto..." class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                  </div>
+                  <div>
+                    <label class="block text-[11px] font-semibold text-slate-500 mb-1">Estado de visita (amigos)</label>
+                    <select id="est-filtro-visita" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none">
+                      <option value="">Todos</option>
+                      <option value="realizado">Visitado</option>
+                      <option value="pendiente">Pendiente</option>
+                      <option value="no_asistio">No estaba</option>
+                      <option value="no_militante">No militante</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div id="lista-estructura" class="space-y-3">
+                <div class="text-center py-10 text-slate-400">
+                    <i class="fas fa-spinner fa-spin text-3xl mb-3"></i>
+                    <p>Cargando estructura...</p>
+                </div>
+            </div>
+        </section>
+        <!-- FIN MÓDULO ESTRUCTURA -->
+
+        <!-- ==================== MÓDULO INFO VOTANTE ==================== -->
+        <section id="modulo-infovotante" class="modulo-seccion fade-in">
+            <div class="text-center py-10 text-slate-400">
+                <i class="fas fa-spinner fa-spin text-2xl mb-2"></i>
+                <p>Cargando Info Votante...</p>
+            </div>
+        </section>
+
+        <!-- ==================== MÓDULO ERRORES ==================== -->
+        <section id="modulo-errores" class="modulo-seccion fade-in">
+            <header class="mb-6">
+                <h1 class="text-2xl font-bold text-slate-800">Registro de Errores</h1>
+            </header>
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                <div class="space-y-3" id="lista-errores">
+                    <div class="flex items-start gap-3 p-3 bg-rose-50 border border-rose-100 rounded-lg">
+                        <i class="fas fa-exclamation-circle text-rose-500 mt-1"></i>
+                        <div>
+                            <p class="text-sm font-medium text-rose-800">Error de Conexión</p>
+                            <p class="text-xs text-rose-600">La API respondió con estado 404</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== MÓDULO MENSAJES WHATSAPP (INTEGRADO) ==================== -->
+        <section id="modulo-mensajes" class="modulo-seccion fade-in">
+            <div class="max-w-4xl mx-auto">
+                <header class="mb-6">
+                    <h1 class="text-2xl font-bold text-slate-800">🤖 Panel de WhatsApp Bot</h1>
+                    <p class="text-slate-500 text-sm">Envía mensajes masivos o individuales a través del servidor</p>
+                </header>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div class="bg-white p-5 rounded-2xl border border-slate-200">
+                        <div class="flex justify-between items-center mb-3">
+                            <h2 class="text-lg font-semibold text-slate-700">Bandeja de entrada</h2>
+                            <button type="button" id="btn-wa-inbox-refresh" class="text-xs px-3 py-1 rounded-md bg-slate-100">Actualizar</button>
+                        </div>
+                        <div id="wa-inbox" class="space-y-2 max-h-80 overflow-y-auto"></div>
+                    </div>
+                    <div class="bg-white p-5 rounded-2xl border border-slate-200 flex flex-col">
+                        <h2 class="text-lg font-semibold text-slate-700 mb-3">Conversación y respuesta</h2>
+                        <div id="wa-chat" class="flex-1 min-h-[180px] max-h-64 overflow-y-auto bg-slate-50 rounded-xl p-3 text-sm mb-3"></div>
+                        <textarea id="wa-reply" rows="3" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm mb-2" placeholder="Escribe la respuesta..."></textarea>
+                        <button type="button" id="btn-wa-reply" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-4 py-2 rounded-xl">Responder por WhatsApp</button>
+                    </div>
+                </div>
+
+                <!-- ESTADO DEL SERVIDOR -->
+                <div id="wa-status" class="mb-4 rounded-xl border px-4 py-3 text-sm flex items-center gap-3 bg-slate-50 border-slate-200 text-slate-900 transition-all duration-300">
+                    <span id="wa-status-dot" class="inline-block w-2.5 h-2.5 rounded-full bg-slate-500 animate-pulse"></span>
+                    <span id="wa-status-text" class="font-medium">⏳ Cargando estado del servidor...</span>
+                </div>
+
+                <!-- FORMULARIO DE ENVÍO -->
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 mb-6">
+                    <h2 class="text-lg font-semibold text-slate-700 mb-4">Enviar Nuevo Mensaje</h2>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600 mb-1">Número de Teléfono</label>
+                            <input type="text" id="wa-to" list="wa-personas-list" placeholder="Ej: 573001234567" 
+                                   class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition">
+                            <datalist id="wa-personas-list"></datalist>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600 mb-1">Mensaje</label>
+                            <textarea id="wa-msg" rows="3" placeholder="Escribe tu mensaje aquí..." 
+                                      class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"></textarea>
+                        </div>
+
+                        <div class="flex flex-wrap gap-3 pt-2">
+                            <button id="btn-wa-enviar" class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-6 py-2 rounded-lg transition shadow-sm">
+                                📤 Enviar
+                            </button>
+                            <button id="btn-wa-plantilla-amigo" class="bg-emerald-100 hover:bg-emerald-200 text-emerald-800 font-medium px-4 py-2 rounded-lg transition text-sm">
+                                👋 Plantilla: Amigo
+                            </button>
+                            <button id="btn-wa-plantilla-cita" class="bg-amber-100 hover:bg-amber-200 text-amber-800 font-medium px-4 py-2 rounded-lg transition text-sm">
+                                📅 Plantilla: Cita
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="wa-cola" class="hidden"></div>
+                <div id="wa-logs" class="hidden"></div>
+            </div>
+        </section>
+        <!-- FIN MÓDULO MENSAJES -->
+
+        <!-- ==================== MÓDULO BOT PQRS (INCLUIDO DEL PRIMER HTML) ==================== -->
+        <section id="modulo-pqrs" class="modulo-seccion fade-in">
+            <div class="max-w-xl mx-auto">
+                <header class="mb-6 text-center">
+                    <h1 class="text-2xl font-bold text-slate-800">🤖 Bot PQRS - Barranquilla</h1>
+                    <p class="text-slate-500 text-sm mt-1">Envía peticiones, quejas, reclamos o sugerencias con soporte de archivo</p>
+                </header>
+
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                    <div class="space-y-4">
+                        <div>
+                            <label for="pdf" class="block text-sm font-medium text-slate-600 mb-1">1. Sube tu PDF o Imagen:</label>
+                            <input type="file" id="pdf" name="pdf" accept=".pdf,.jpg,.jpeg,.png"
+                                   class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition file:mr-4 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
+                        </div>
+
+                        <div>
+                            <label for="nombre" class="block text-sm font-medium text-slate-600 mb-1">Nombre:</label>
+                            <input type="text" id="nombre" placeholder="Tu nombre completo"
+                                   class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition">
+                        </div>
+
+                        <div>
+                            <label for="cedula" class="block text-sm font-medium text-slate-600 mb-1">Cédula:</label>
+                            <input type="text" id="cedula" placeholder="Número de cédula"
+                                   class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition">
+                        </div>
+
+                        <div>
+                            <label for="email" class="block text-sm font-medium text-slate-600 mb-1">Correo Electrónico:</label>
+                            <input type="email" id="email" placeholder="ejemplo@correo.com"
+                                   class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition">
+                        </div>
+
+                        <div>
+                            <label for="telefono" class="block text-sm font-medium text-slate-600 mb-1">Teléfono:</label>
+                            <input type="tel" id="telefono" placeholder="300 123 4567"
+                                   class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition">
+                        </div>
+
+                        <div>
+                            <label for="descripcion" class="block text-sm font-medium text-slate-600 mb-1">Descripción:</label>
+                            <textarea id="descripcion" rows="3" placeholder="Escribe tu petición aquí..."
+                                      class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"></textarea>
+                        </div>
+
+                        <div>
+                            <label for="tipo" class="block text-sm font-medium text-slate-600 mb-1">Tipo:</label>
+                            <select id="tipo"
+                                    class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition bg-white">
+                                <option value="PQR">PQR</option>
+                                <option value="Petición">Petición</option>
+                                <option value="Queja">Queja</option>
+                                <option value="Sugerencia">Sugerencia</option>
+                            </select>
+                        </div>
+
+                        <button id="btnEnviar" onclick="procesarDatos()"
+                                class="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-medium px-6 py-3 rounded-lg transition shadow-sm mt-2">
+                            Enviar Formulario
+                        </button>
+                    </div>
+
+                    <div id="loader" class="pqrs-loader text-center mt-4 text-slate-500 italic text-sm">
+                        ⏳ Procesando... (Puede tardar unos segundos)
+                    </div>
+                    <div id="status" class="pqrs-status mt-4 p-3 rounded-lg bg-slate-50 text-sm text-slate-700 min-h-[40px] break-words">
+                        Esperando...
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- FIN MÓDULO BOT PQRS -->
+
+    </main>
+
+    <!-- CRÍTICO: auth primero para no dejar la pantalla colgada -->
+    <script src="/js/api-client.js"></script>
+    <script src="/js/auth.js"></script>
+
+    <!-- Pesados: se cargan DESPUÉS de validar sesión -->
+    <script>
+    (function () {
+      var HEAVY = [
+        'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
+        'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js',
+        'https://cdn.socket.io/4.7.4/socket.io.min.js',
+        'js/whatsapp-supabase.js',
+        'js/modules/Mensajes.js',
+        'js/modules/Alcaldia.js',
+        'js/data/puestos_barranquilla_2026.js',
+        'js/modules/InfoVotante.js',
+        'js/modules/Estructura.js',
+        'js/modules/Agenda.js',
+        'js/modules/Gestiones.js',
+        'js/modules/Seguimiento.js',
+      ];
+      function loadScript(src) {
+        return new Promise(function (resolve) {
+          var s = document.createElement('script');
+          s.src = src;
+          s.async = false;
+          s.onload = function () { resolve(true); };
+          s.onerror = function () { console.warn('[boot] no cargó', src); resolve(false); };
+          document.body.appendChild(s);
+        });
+      }
+      async function loadHeavy() {
+        var bootTxt = document.querySelector('#boot-loader div:last-child');
+        if (bootTxt) bootTxt.textContent = 'Cargando módulos…';
+        for (var i = 0; i < HEAVY.length; i++) {
+          await loadScript(HEAVY[i]);
+        }
+        window.App = window.App || {};
+        window.App.instance = window.App.instance || {};
+        if (window.App.Estructura && !window.App.instance.estructura) {
+          window.App.instance.estructura = window.App.Estructura.create();
+        }
+        window.dispatchEvent(new Event('modulos-listos'));
+        console.log('[GestorApp] módulos listos');
+      }
+      var started = false;
+      function startOnce() {
+        if (started) return;
+        started = true;
+        loadHeavy();
+      }
+      if (document.documentElement.classList.contains('auth-ok')) startOnce();
+      window.addEventListener('auth-ready', startOnce, { once: true });
+      setTimeout(startOnce, 1500);
+    })();
+    </script>
+
+    <!-- SCRIPT DE INICIALIZACIÓN DE MÓDULOS -->
+    <script>
+        window.App = window.App || {};
+        window.App.instance = window.App.instance || {};
+
+        // Crear instancia de Estructura (si el factory existe y aún no hay instancia)
+        if (window.App.Estructura && !window.App.instance.estructura) {
+            window.App.instance.estructura = window.App.Estructura.create();
+        }
+
+        // Conectar bot WhatsApp apenas cargue la app (no esperar a abrir la pestaña)
+        function bootMensajes() {
+            if (typeof initModuloMensajes === 'function') {
+                try {
+                    initModuloMensajes();
+                    console.log('[GestorApp] Mensajes/WhatsApp iniciado');
+                } catch (e) {
+                    console.error('[GestorApp] Error iniciando Mensajes:', e);
+                }
+            } else {
+                console.warn('[GestorApp] initModuloMensajes no existe aún — reintento en 1s');
+                setTimeout(bootMensajes, 1000);
+            }
+        }
+        window.addEventListener('modulos-listos', function () { setTimeout(bootMensajes, 200); });
+
+        // Inicializar módulos al cambiar de pestaña
+        const originalCambiarModulo = window.cambiarModulo;
+        window.cambiarModulo = function(moduloId) {
+            if (moduloId === 'asistencia') moduloId = 'mensajes';
+            var inst = (window.App && window.App.instance) || {};
+            try {
+                if (moduloId === 'mensajes') {
+                    if (typeof initModuloMensajes === 'function') initModuloMensajes();
+                    else if (inst.mensajes && inst.mensajes.init) inst.mensajes.init();
+                }
+                if (moduloId === 'estructura' && inst.estructura && inst.estructura.init) inst.estructura.init();
+                if (moduloId === 'infovotante' && inst.infoVotante && inst.infoVotante.init) inst.infoVotante.init();
+                if (moduloId === 'agenda' && inst.agenda && inst.agenda.init) inst.agenda.init();
+                if (moduloId === 'gestiones' && inst.gestiones && inst.gestiones.init) inst.gestiones.init();
+                if (moduloId === 'seguimiento' && inst.seguimiento && inst.seguimiento.init) inst.seguimiento.init();
+                if (moduloId === 'gestiones-judiciales' && inst.alcaldia && inst.alcaldia.init) inst.alcaldia.init();
+                if (moduloId === 'errores' && inst.estructura && inst.estructura.renderErrores) inst.estructura.renderErrores();
+            } catch (e) {
+                console.warn('[cambiarModulo] init', e);
+            }
+            originalCambiarModulo(moduloId);
+        };
+    </script>
+
+    <!-- LÓGICA DEL BOT PQRS (del primer HTML, sin cambios de funcionalidad) -->
+    <script>
+        // CAMBIO: Conexión a la URL de Ngrok
+        let socketPQRS = null;
+        function getSocketPQRS() {
+            if (socketPQRS) return socketPQRS;
+            if (typeof io !== 'function') return null;
+            socketPQRS = io('https://phoenix-vest-crystal.ngrok-free.dev', {
+                autoConnect: false,
+                timeout: 4000,
+                reconnectionAttempts: 3
+            });
+            socketPQRS.on('connect', () => {
+                updateStatusPQRS('✅ Conectado al servidor.', 'success');
+            });
+            socketPQRS.on('bot_status_update', (data) => {
+                updateStatusPQRS(data.last_log || 'Esperando...', data.last_error ? 'error' : 'success');
+                if (!data.running) {
+                    var b = document.getElementById('btnEnviar');
+                    var l = document.getElementById('loader');
+                    if (b) b.disabled = false;
+                    if (l) l.style.display = 'none';
+                }
+            });
+            socketPQRS.on('disconnect', () => {
+                updateStatusPQRS('❌ Desconectado del servidor.', 'error');
+            });
+            socketPQRS.connect();
+            return socketPQRS;
+        }
+        window.addEventListener('modulos-listos', function () {
+            setTimeout(function () { try { getSocketPQRS(); } catch (e) {} }, 4000);
+        });
+
+        function procesarDatos() {
+            const fileInput = document.getElementById('pdf');
+            const nombre = document.getElementById('nombre').value;
+            const cedula = document.getElementById('cedula').value;
+            const email = document.getElementById('email').value;
+            const telefono = document.getElementById('telefono').value;
+            const descripcion = document.getElementById('descripcion').value;
+            const tipo = document.getElementById('tipo').value;
+
+            if (!nombre || !cedula || !email) {
+                alert("Por favor completa al menos Nombre, Cédula y Correo.");
+                return;
+            }
+
+            if (fileInput.files.length === 0) {
+                alert("Por favor selecciona un archivo (PDF, JPG o PNG).");
+                return;
+            }
+
+            const btn = document.getElementById('btnEnviar');
+            const loader = document.getElementById('loader');
+            btn.disabled = true;
+            loader.style.display = 'block';
+            try { getSocketPQRS(); } catch (e) {}
+            updateStatusPQRS("Conectando con el bot...", 'success');
+
+            const formData = new FormData();
+            formData.append('pdf', fileInput.files[0]); 
+            formData.append('nombre', nombre);
+            formData.append('cedula', cedula);
+            formData.append('email', email);
+            formData.append('telefono', telefono);
+            formData.append('descripcion', descripcion);
+            formData.append('tipo', tipo);
+
+            // CAMBIO: Fetch apuntando a la URL de Ngrok
+            fetch('https://phoenix-vest-crystal.ngrok-free.dev/run-bot', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    updateStatusPQRS("Error: " + data.error, 'error');
+                    btn.disabled = false;
+                    loader.style.display = 'none';
+                } else {
+                    updateStatusPQRS("✅ ¡Datos enviados! El bot está trabajando ahora.", 'success');
+                }
+            })
+            .catch(err => {
+                updateStatusPQRS("Error de conexión con el servidor: " + err.message, 'error');
+                btn.disabled = false;
+                loader.style.display = 'none';
+            });
+        }
+
+        function updateStatusPQRS(msg, type = 'neutral') {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = msg;
+            statusDiv.className = 'pqrs-status mt-4 p-3 rounded-lg bg-slate-50 text-sm min-h-[40px] break-words ' + (type === 'error' ? 'error' : type === 'success' ? 'success' : '');
+        }
+    </script>
+
+</body>
+</html>
